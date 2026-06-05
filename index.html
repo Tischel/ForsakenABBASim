@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -140,8 +141,9 @@
         <p id="diffDesc" style="font-size:13px;color:var(--muted);margin:0;min-height:1.4em;">The fight pauses at each step. Take your time to think.</p>
         <p id="ovText" style="display:none;max-width:380px;line-height:1.55;margin:0;font-size:14px;"></p>
         <div id="diffToggle" style="display:flex;gap:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:0 auto;">
-          <button id="diffEasy" class="diffBtn active" onclick="setDiff('easy')">Easy</button>
-          <button id="diffHard" class="diffBtn"        onclick="setDiff('hard')">Hard</button>
+          <button id="diffEasy"   class="diffBtn active" onclick="setDiff('easy')">Easy</button>
+          <button id="diffNormal" class="diffBtn"        onclick="setDiff('normal')">Normal</button>
+          <button id="diffHard"   class="diffBtn"        onclick="setDiff('hard')">Hard</button>
         </div>
         <div class="roles" id="roleGrid" style="width:100%;max-width:430px;margin:0 auto;"></div>
       </div>
@@ -193,18 +195,20 @@ arenaImg.onload = ()=>{ arenaReady = true; draw(); };
 arenaImg.src = ARENA_SRC;
 
 /* ---- difficulty ---- */
-let DIFFICULTY = 'easy'; // 'easy' | 'hard'
+let DIFFICULTY = 'easy'; // 'easy' | 'normal' | 'hard'
 const DIFF_DESCS = {
-  easy: 'The fight pauses at each step. Take your time to think.',
-  hard: 'Real time - no pauses. When a tower resolves, the game freezes for a few seconds to see debuff resolutions and assignments.',
+  easy:   'The fight pauses at each step. Take your time to think.',
+  normal: 'Real time - no pauses. Spot markers show; click to choose.',
+  hard:   'Real time - move with WASD.',
 };
 function setDiff(d){
   DIFFICULTY = d;
   document.getElementById('diffEasy').classList.toggle('active', d==='easy');
+  document.getElementById('diffNormal').classList.toggle('active', d==='normal');
   document.getElementById('diffHard').classList.toggle('active', d==='hard');
   const dd=document.getElementById('diffDesc'); if(dd) dd.textContent=DIFF_DESCS[d];
   const oc=document.getElementById('objectiveCard');
-  if(oc) oc.style.display = (d==='hard') ? 'none' : '';
+  if(oc) oc.style.display = (d==='normal'||d==='hard') ? 'none' : '';
 }
 
 /* ---- geometry (normalized 0..1 of the 700px arena) ---- */
@@ -280,6 +284,7 @@ function newGame(myRole){
     history:[],        // per-step result: 'done'|'fail'
     awaitClick:false,
     currentValidPositions:[], // keys clickable this step
+    playerPos: null,          // {x,y} normalized, for Hard WASD mode
     correctForMe:null,
     stepType:null,     // 'solve' | 'bait'
     setIndex:null,     // which tower set (1..8) this solve step refers to
@@ -296,16 +301,22 @@ function startFormation(){
   G.stepType='formation';
   G.awaitClick=false;
   G.showAttacks=false;
-  G.cast='Forsaken'; // kept for reference but bar is hidden during formation
+  G.cast='Forsaken';
+  // Initialise playerPos to the formation spot for this role
+  const fp = INITIAL_FORMATION[G.myRole];
+  G.playerPos = fp ? {x: fp.x, y: fp.y} : {x:0.5, y:0.5};
   G.placements={};
   for(const r of ROLES) G.placements[r]=null;
   G.formationActive=true;
+  G.planIdx = -1; // sentinel so startCastBar finds the Forsaken entry
   updateUI();
   draw();
+  startCastBar();
+  G.planIdx = 0;  // reset immediately after startCastBar reads it
   if(DIFFICULTY==='easy'){
     showContinueBtn(()=>{ G.formationActive=false; startStep(); });
   } else {
-    // Hard: auto-advance after 5s
+    // Normal/Hard: auto-advance after 5s
     setTimeout(()=>{ G.formationActive=false; startStep(); }, 5000);
   }
 }
@@ -508,8 +519,9 @@ function startStep(){
     G.cast='All Things Ending — DODGE!';
   }
   G.awaitClick=true;
-  if(DIFFICULTY==='hard'){
+  if(DIFFICULTY!=='easy'){
     startHardTimer(); // also drives the step bar with timeout
+    if(DIFFICULTY==='hard') startWASD();
   } else {
     animateStepBar(0); // easy: just show bar full, no countdown
   }
@@ -535,6 +547,7 @@ function stopHardTimer(){
   if(G) G.hardStepActive=false;
   if(stepbarEl){ stepbarEl.style.display='none'; }
   if(stepFillEl){ stepFillEl.style.width='100%'; }
+  stopWASD();
 }
 
 function solvePositionsFor(parity){
@@ -552,6 +565,7 @@ function solvePositionsFor(parity){
 /* handle a click on a position */
 function choosePosition(key){
   if(!G || G.over || !G.awaitClick) return;
+  if(DIFFICULTY==='hard') return; // Hard mode uses WASD only
 
   const correct = (key===G.correctForMe);
   // place me where I clicked, everyone else correct
@@ -579,6 +593,44 @@ function choosePosition(key){
 
 function resolveHardStep(timedOut){
   stopHardTimer(); // also clears G.hardStepActive
+
+  if(DIFFICULTY==='hard'){
+    // Hard: check if playerPos is close enough to the correct spot
+    const correctKey = G.correctForMe;
+    const correctPos = POS[correctKey];
+    let correct = false;
+    let closestKey = null;
+    let closestDist = Infinity;
+    if(G.playerPos && correctPos){
+      // Find which named spot the player is closest to (among valid ones)
+      for(const key of G.currentValidPositions){
+        const p = POS[key];
+        const dx = G.playerPos.x - p.x;
+        const dy = G.playerPos.y - p.y;
+        const d = Math.sqrt(dx*dx+dy*dy);
+        if(d < closestDist){ closestDist=d; closestKey=key; }
+      }
+      // Accept if within ~10% of arena width of the correct spot
+      const dx = G.playerPos.x - correctPos.x;
+      const dy = G.playerPos.y - correctPos.y;
+      const dist = Math.sqrt(dx*dx+dy*dy);
+      correct = dist < 0.05;
+    }
+    // Set placements so the attack window shows correct positions
+    G.placements = Object.assign({}, G.correctPlacements);
+    if(!correct){
+      G.history.push('fail');
+      const badKey = closestKey || '(missed)';
+      G.badKey = badKey;
+      showAttacksThen(()=>{ gameOver(false, badKey); });
+    } else {
+      G.history.push('done');
+      showAttacksThen(()=>{ advance(); });
+    }
+    return;
+  }
+
+  // Normal mode: playerChoice set by click
   if(timedOut || !G.playerChoice){
     // No click or timed out = wipe
     G.history.push('fail');
@@ -623,7 +675,7 @@ function showAttacksThen(cb){
   if(DIFFICULTY==='easy'){
     showContinueBtn();
   } else {
-    // Hard: no freeze on bait/dodge steps; 2s freeze on solve steps
+    // Normal/Hard: no freeze on bait/dodge steps; 2s freeze on solve steps
     const freeze = (p && p.kind==='solve') ? 2000 : 0;
     updateUI(); draw();
     setTimeout(()=>{
@@ -698,33 +750,30 @@ function draw(){
     return;
   }
 
-  // during selection: show towers (if solve), bait spots, clickable positions, NO players
-  // during attack window: show players + attacks + debuff icons
-  const showSpots = G.awaitClick;
-  const showPlayers = !G.awaitClick;
-
-  // towers visible during solve steps (select + attack window)
+  // towers always visible during solve steps
   if(G.stepType==='solve'){ drawTower(LEFT_TOWER); drawTower(RIGHT_TOWER); }
 
-  // bait/dodge: show both bait spots subtly + party target
+  // bait/dodge: show both bait zones
   if(G.stepType==='bait'||G.stepType==='dodge'){
     drawBaitZone(POS.PAST_END_BAIT, "Past");
     drawBaitZone(POS.FUTURE_END_BAIT, "Future");
   }
 
-  if(showSpots){
-    for(const key of G.currentValidPositions){
-      drawSpot(key);
+  if(DIFFICULTY==='hard' && !G.showAttacks){
+    // Hard: show only the player avatar at free-move position, no spot markers
+    if(G.playerPos) drawPlayerFree(ax(G.playerPos.x), ay(G.playerPos.y), G.myRole);
+  } else {
+    // Easy/Normal: spots during selection, all players during attack window
+    const showSpots = G.awaitClick;
+    const showPlayers = !G.awaitClick;
+    if(showSpots){
+      for(const key of G.currentValidPositions){ drawSpot(key); }
     }
+    if(G.showAttacks){ drawAttacks(); }
+    if(showPlayers){ drawPlayers(); }
   }
 
-  if(G.showAttacks){
-    drawAttacks();
-  }
-
-  if(showPlayers){
-    drawPlayers();
-  }
+  if(DIFFICULTY==='hard' && G.showAttacks){ drawAttacks(); drawPlayers(); }
 }
 
 function drawTower(t){
@@ -837,6 +886,12 @@ function drawPlayer(x,y,r){
     }
   }
 }
+
+function drawPlayerFree(x, y, role){
+  // Draw just the player token at an arbitrary pixel position
+  drawPlayer(x, y, role);
+}
+
 
 function roundRect(x,y,w,h,rad){
   ctx.beginPath();
@@ -972,7 +1027,7 @@ const controlsEl=document.getElementById('controls');
 function updateUI(){
   if(!G){ return; }
   const formation = (G.stepType==='formation');
-  const stepNum = formation ? 1 : G.planIdx+2; // step 1 is formation
+  const stepNum = formation ? 1 : Math.min(G.planIdx+2, 14); // step 1 is formation
   stepNEl.textContent = `Step ${stepNum} / 14`;
   // build progress dots (1 formation + 13 interactive steps = 14)
   progressEl.innerHTML='';
@@ -1041,11 +1096,15 @@ function promptFor(){
 // Per-plan-index cast data: {name, offsetMs, durationMs}
 // Only steps where a cast is actually active during the player window.
 const PLAN_CASTS = {
+  '-1': { offsetMs: 0, durationMs: 6700 }, // formation: Forsaken cast (full 6.7s)
   1:  { offsetMs: 2316, durationMs: 6375 }, // set2: Past's/Future's End
   3:  { offsetMs: 0,    durationMs: 9124 }, // set3: All Things Ending
   4:  { offsetMs: 2227, durationMs: 6377 }, // set4: Past's/Future's End
+  6:  { offsetMs: 0,    durationMs: 9991 }, // set5: All Things Ending (starts immediately)
   7:  { offsetMs: 2178, durationMs: 6381 }, // set6: Past's/Future's End
+  9:  { offsetMs: 0,    durationMs: 9812 }, // set7: All Things Ending (starts immediately)
   10: { offsetMs: 2275, durationMs: 6381 }, // set8: Past's/Future's End
+  12: { offsetMs: 0,    durationMs: 4978 }, // dodge: All Things Ending (starts immediately)
 };
 
 let castRAF=null;
@@ -1153,6 +1212,59 @@ cv.addEventListener('mousemove',(e)=>{
   cv.style.cursor=hit?'pointer':'crosshair';
 });
 
+/* ---- WASD movement (Hard difficulty) ---- */
+const WASD_KEYS = {w:false,a:false,s:false,d:false,ArrowUp:false,ArrowLeft:false,ArrowDown:false,ArrowRight:false};
+const WASD_SPEED = 0.00028; // normalized units per ms
+let wasdRAF=null, wasdLastT=null;
+
+document.addEventListener('keydown', e=>{
+  if(e.key in WASD_KEYS){ WASD_KEYS[e.key]=true; e.preventDefault(); }
+});
+document.addEventListener('keyup', e=>{
+  if(e.key in WASD_KEYS) WASD_KEYS[e.key]=false;
+});
+
+function startWASD(){
+  stopWASD();
+  wasdLastT=null;
+  function tick(t){
+    if(!G||G.over||DIFFICULTY!=='hard'){ stopWASD(); return; }
+    if(!G.awaitClick && !G.hardStepActive){ stopWASD(); return; }
+    if(wasdLastT!==null && G.awaitClick){
+      const dt = Math.min(t-wasdLastT, 50);
+      let dx=0,dy=0;
+      if(WASD_KEYS['a']||WASD_KEYS['ArrowLeft'])  dx-=1;
+      if(WASD_KEYS['d']||WASD_KEYS['ArrowRight']) dx+=1;
+      if(WASD_KEYS['w']||WASD_KEYS['ArrowUp'])    dy-=1;
+      if(WASD_KEYS['s']||WASD_KEYS['ArrowDown'])  dy+=1;
+      if(dx||dy){
+        const len=Math.sqrt(dx*dx+dy*dy);
+        dx=dx/len*WASD_SPEED*dt;
+        dy=dy/len*WASD_SPEED*dt;
+        let nx=G.playerPos.x+dx;
+        let ny=G.playerPos.y+dy;
+        const cx=0.5,cy=0.5;
+        const rdx=nx-cx,rdy=ny-cy;
+        const dist=Math.sqrt(rdx*rdx+rdy*rdy);
+        if(dist>ARENA_R-0.02){
+          nx=cx+rdx/dist*(ARENA_R-0.02);
+          ny=cy+rdy/dist*(ARENA_R-0.02);
+        }
+        G.playerPos={x:nx,y:ny};
+        draw();
+      }
+    }
+    wasdLastT=t;
+    wasdRAF=requestAnimationFrame(tick);
+  }
+  wasdRAF=requestAnimationFrame(tick);
+}
+
+function stopWASD(){
+  if(wasdRAF){ cancelAnimationFrame(wasdRAF); wasdRAF=null; }
+  wasdLastT=null;
+}
+
 /* ---- overlays ---- */
 const overlay=document.getElementById('overlay');
 const ovTitle=document.getElementById('ovTitle');
@@ -1189,6 +1301,9 @@ function showOverlayResult(){
     const stepNum = G.planIdx+2;
     if(G.badKey==='(timeout)'||G.badKey==='(no selection)'){
       ovText.innerHTML=`You didn't select a position in time on step <b>${stepNum}</b>.<br>`+
+        `Correct spot was <b>${pretty(want)}</b>.`;
+    } else if(DIFFICULTY==='hard'){
+      ovText.innerHTML=`You were too far from the correct spot on step <b>${stepNum}</b>.<br>`+
         `Correct spot was <b>${pretty(want)}</b>.`;
     } else {
       ovText.innerHTML=`You went to <b>${pretty(G.badKey)}</b> on step <b>${stepNum}</b>.<br>`+
