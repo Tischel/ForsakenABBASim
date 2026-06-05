@@ -534,7 +534,7 @@ function startStep(){
 // Per-step durations for Hard mode (milliseconds), derived from the timeline.
 // Index matches G.plan order: [set1, set2, bait-for-3, set3, set4,
 //   bait-for-5, set5, set6, bait-for-7, set7, set8, bait-final, dodge-final]
-const HARD_STEP_DURATIONS = [6000, 10027, 5000, 11006, 9988, 6380, 11018, 10031, 6323, 11014, 10034, 7919, 5221];
+const HARD_STEP_DURATIONS = [6000, 10027, 5000, 5000, 10000, 5000, 5000, 10000, 5000, 5000, 10000, 5000, 5000];
 
 function startHardTimer(){
   stopHardTimer();
@@ -1097,14 +1097,14 @@ function promptFor(){
 // Only steps where a cast is actually active during the player window.
 const PLAN_CASTS = {
   '-1': { offsetMs: 0, durationMs: 6700 }, // formation: Forsaken cast (full 6.7s)
-  1:  { offsetMs: 2316, durationMs: 6375 }, // set2: Past's/Future's End
-  3:  { offsetMs: 0,    durationMs: 9124 }, // set3: All Things Ending
-  4:  { offsetMs: 2227, durationMs: 6377 }, // set4: Past's/Future's End
-  6:  { offsetMs: 0,    durationMs: 9991 }, // set5: All Things Ending (starts immediately)
-  7:  { offsetMs: 2178, durationMs: 6381 }, // set6: Past's/Future's End
-  9:  { offsetMs: 0,    durationMs: 9812 }, // set7: All Things Ending (starts immediately)
-  10: { offsetMs: 2275, durationMs: 6381 }, // set8: Past's/Future's End
-  12: { offsetMs: 0,    durationMs: 4978 }, // dodge: All Things Ending (starts immediately)
+  1:  { offsetMs: 2316, durationMs: 6375 }, // set2:  Past's/Future's End (10s step, ends at 8.7s)
+  3:  { offsetMs: 0,    durationMs: 5000 }, // set3:  All Things Ending (full 5s step)
+  4:  { offsetMs: 2227, durationMs: 6377 }, // set4:  Past's/Future's End (10s step, ends at 8.6s)
+  6:  { offsetMs: 0,    durationMs: 5000 }, // set5:  All Things Ending (full 5s step)
+  7:  { offsetMs: 2178, durationMs: 6381 }, // set6:  Past's/Future's End (10s step, ends at 8.6s)
+  9:  { offsetMs: 0,    durationMs: 5000 }, // set7:  All Things Ending (full 5s step)
+  10: { offsetMs: 2275, durationMs: 6381 }, // set8:  Past's/Future's End (10s step, ends at 8.7s)
+  12: { offsetMs: 0,    durationMs: 5000 }, // dodge: All Things Ending (full 5s step)
 };
 
 let castRAF=null;
